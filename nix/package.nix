@@ -38,7 +38,7 @@ in {
     wrapperArgs = [ "--add-flags" "${notices} ${toString notice.width} ${toString notice.height}" "--suffix" "PATH" ":" "${pkgs.systemd}/bin" ];
   };
   # The shortcut's pictures: the icon by itself, and the directory Steam's artwork is taken from.
-  artwork = { icon = "${../assets/icon.png}"; directory = ../assets; };
+  artwork = { icon = "${../assets/icon.png}"; directory = pkgs.runCommand "deckpad-artwork" { } "cp -r ${../assets} $out"; };
   tray = build {
     name = "deckpad-tray";
     inherit src;
