@@ -76,6 +76,7 @@ in {
       boot.kernelModules = [ "uinput" ] ++ lib.optionals cfg.usb [ "libcomposite" "usb_f_fs" ];
       systemd.services.deckpad = {
         description = "Steam Deck controls as a Steam Controller";
+        restartIfChanged = false;  # started on demand: a switch must not end a session, and the next start is the new build
         after = [ "jupiter-controller-update.service" ] ++ lib.optional cfg.bluetooth "bluetooth.service";
         wants = lib.optional cfg.bluetooth "bluetooth.service";
         serviceConfig = {
@@ -148,6 +149,7 @@ in {
       boot.kernelModules = [ "vhci-hcd" ];
       systemd.services.deckpad-attach = {
         description = "Attach the Steam Deck's controller";
+        reloadIfChanged = true;  # a switch asks; the service leaves for the new build once no controller is attached
         wantedBy = [ "multi-user.target" ];
         after = [ "network-online.target" ];
         wants = [ "network-online.target" ];
@@ -155,6 +157,7 @@ in {
           # Keys named in the configuration are trusted before the first attach.
           ExecStartPre = map (line: "${deckpad} trust-local ${lib.escapeShellArg line}") cfg.trustedKeys;
           ExecStart = "${deckpad} attach ${lib.escapeShellArg cfg.controller} --port ${toString cfg.port} --watch";
+          ExecReload = "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
           ExecStopPost = "${deckpad} detach";
           StateDirectory = "deckpad";
           StateDirectoryMode = "0700";

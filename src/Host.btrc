@@ -16,6 +16,8 @@ class DeckProcess {
     class void wait(int childPid) { deckTunnelWait(childPid); }
     class void terminate(int childPid) { deckTunnelTerminate(childPid); }
     class void closeDescriptor(int descriptor) { deckCloseDescriptor(descriptor); }
+    class bool holdReload() { return deckHoldReload(); }  // SIGHUP waits until it is looked for
+    class bool reloadAsked() { return deckReloadAsked(); }
 }
 
 // The controller's USB/IP stream in the clear, at one end of a socket pair. A

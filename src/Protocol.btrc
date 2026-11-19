@@ -5,6 +5,9 @@ class NetworkProtocol {
     class string accepted() { return "ok"; }
     class string refusedUnpaired() { return "refused: this host is not paired with the controller; open pairing on the Deck, then run `deckpad pair`"; }
     class string refusedBusy() { return "refused: the controller is in use over another link"; }
+    class string refusedVersion() { return "refused: version: the controller speaks `deckpad 1`, the host something else; bring both machines to the same build"; }
+    class bool versionRefusal(string said) { return said.contains("refused: version"); }  // also in a host's error, which names the controller first
+    class bool otherVersion(string hello) { return hello.startsWith("deckpad ") && !hello.startsWith(NetworkProtocol.greeting()); }
 
     // The device id USB/IP gives the controller: bus 1, device 2.
     class long long deviceId() { return 0x10002LL; }

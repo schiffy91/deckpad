@@ -13,6 +13,7 @@ import deckpad.Controller;
 import deckpad.ControllerUSB;
 import deckpad.Doctor;
 import deckpad.Link;
+import deckpad.NetworkLink;
 import deckpad.PadSource;
 import deckpad.PadState;
 import deckpad.Service;
@@ -373,6 +374,34 @@ class DeckpadUnitTests {
         return false;
     }
 
+    // A host that dials the network link while another link holds the
+    // controller is hung up on before any handshake: the handshake waits on
+    // that host, and the wait would be taken from the host that is attached.
+    class void dialledWhileHeld() {
+        var controller = VirtualController(ScriptedPad(), SteamController("FXDK00000043"), false);
+        var service = ControllerService(controller);
+        var dir = TestDir("deckpad-dialled");
+        service.announceIn(dir.path);
+        var wired = SwitchedLink("wired", controller, false);
+        service.add(wired);
+        service.add(NetworkLink(controller, SigningKey.generate(), Pairing(dir.path + "/trusted"), "127.0.0.1", 32431, []));
+        service.open();
+        wired.host = true;
+        Expect.isTrue(service.turn(5) && service.holding().equals("wired"));
+        long long slowest = 0LL;
+        for (int dial = 0; dial < 5; dial++) {
+            var silent = TCPStream.connect(IPv4Address.loopback(), 32431, 1000);  // connects and says nothing
+            long long started = MonotonicClock.milliseconds();
+            for (int turn = 0; turn < 3; turn++) { Expect.isTrue(service.turn(5) && service.holding().equals("wired")); }
+            long long took = MonotonicClock.milliseconds() - started;
+            if (took > slowest) { slowest = took; }
+            Expect.isTrue(silent.readBytes(1, 500).length() == 0);  // hung up on, not answered
+            silent.close();
+        }
+        Expect.isTrue(slowest < 200LL);  // a handshake with a silent host takes 1500 ms
+        service.close();
+    }
+
     // Links share one controller: the first host to attach, on any link,
     // holds it until it leaves.
     class void links() {
@@ -514,6 +543,7 @@ int main() {
     DeckpadUnitTests.bluetoothPort();
     DeckpadUnitTests.pairing();
     DeckpadUnitTests.links();
+    DeckpadUnitTests.dialledWhileHeld();
     DeckpadUnitTests.stopChord();
     DeckpadUnitTests.use();
     DeckpadUnitTests.pace();

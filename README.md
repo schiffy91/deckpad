@@ -119,6 +119,21 @@ loop turn each link sends the newest state; a link that is behind skips a
 report instead of sending a stale one. Over the network that is one pad
 report per 4 ms with Nagle off.
 
+**One host at a time, and nothing taken from it.** A host that dials the
+network link while another link holds the controller is hung up on before any
+handshake: proving keys waits on the dialling host for up to three seconds,
+and that wait would be the attached host's. While the pairing window is open
+a dialling host is still heard, so a second machine can be paired during a
+session. A host of another version of the program (one machine updated, the
+other not) is told `refused: version`, the Deck logs it once, and the host
+asks again once a minute, not every three seconds.
+
+**Across an update.** A system switch does not end a session. On the Deck the
+service is started on demand and is not restarted when its build changes: the
+next start is the new build. On the PC `deckpad-attach` is asked to reload,
+which it answers once no controller is attached, by leaving so that the new
+build starts; while a controller is attached it stays as it is.
+
 **The Deck's screen.** The shortcut and the tray start `deckpad-screen` after
 the service, and it lasts until the service stops. While a host holds the
 controller the service leaves a file named for the host's link in
@@ -216,7 +231,10 @@ ci/                the jobs a local pass can stand in for
   and is a host for it over loopback: refused before pairing, paired while the
   window is open, attached through the encrypted tunnel, then enumeration,
   250 reports a second in order with a bound on their age, outputs,
-  reconnecting, a second host turned away, and forgetting. The screen runs on
+  reconnecting, a second host turned away, a host of another version told
+  so, and forgetting. A host that dials in silence while another link holds
+  the controller costs the service's turns nothing (under 200 ms where a
+  handshake would take 1,500). The screen runs on
   a virtual display beside a pretend service and backlight: its notices, the
   dark screen at the lowest brightness, a touch with and without a host, the
   brightness given back, and a level left dark by a killed screen put right.

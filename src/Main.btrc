@@ -143,6 +143,9 @@ class Deckpad {
     // attaching is logged once, not on every try.
     class void attach(CLICommandLine options, bool watch) {
         string logged = "";
+        // A reload (a newer build was installed) must not take the controller from a game: it is held
+        // back while attached and answered once the controller is gone, by leaving for the new build.
+        if (watch && !DeckProcess.holdReload()) { throw "Cannot hold back the reload signal"; }
         while (true) {
             try {
                 Deckpad.host(options).attach();
@@ -153,7 +156,12 @@ class Deckpad {
                 logged = error;
             }
             if (!watch) { return; }
-            Timer.sleepMillis(3000);
+            int pause = NetworkProtocol.versionRefusal(logged) ? 60000 : 3000;  // an update cures that, not a moment
+            for (int waited = 0; waited < pause && !DeckProcess.reloadAsked(); waited += 500) { Timer.sleepMillis(500); }
+            if (DeckProcess.reloadAsked()) {
+                Console.error("deckpad: a newer build is installed; leaving so that it starts");
+                return;
+            }
         }
     }
 

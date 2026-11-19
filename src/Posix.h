@@ -69,6 +69,21 @@ static inline bool deckStopSignalled(bool includeHup) {
     return includeHup && sigismember(&pending, SIGHUP) == 1;
 }
 
+/* A reload is asked for with SIGHUP and answered when the caller is free to:
+ * held back, it waits as a pending signal and interrupts nothing. */
+static inline bool deckHoldReload(void) {
+    sigset_t reload;
+    sigemptyset(&reload);
+    sigaddset(&reload, SIGHUP);
+    return sigprocmask(SIG_BLOCK, &reload, NULL) == 0;
+}
+
+static inline bool deckReloadAsked(void) {
+    sigset_t pending;
+    sigemptyset(&pending);
+    return sigpending(&pending) == 0 && sigismember(&pending, SIGHUP) == 1;
+}
+
 static inline int deckTunnelParentPid(void) {
     return (int)getpid();
 }

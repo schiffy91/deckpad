@@ -2,6 +2,7 @@ import Library.Bytes;
 import Library.CLI;
 import Library.Crypto;
 import Library.FileSystem;
+import Library.Network;
 import Library.Process;
 import Library.Strings;
 import Library.Testing;
@@ -181,6 +182,19 @@ class DeckpadServerTests {
         }
         Expect.contains(DeckpadServerTests.control("POST", "/forget?fingerprint=" + fingerprint.replace("+", "%2B"), "", controlPort, runtime), "forgotten");
         Expect.contains(desk.refusal(), "not paired");
+
+        // A host of another version is told so. It used to be hung up on without
+        // a word, and kept dialling every three seconds with nothing to show why.
+        var newer = SecureChannel.connect(TCPStream.connectHost("127.0.0.1", port, 5000), SigningKey.generate(), 5000);
+        Bytes told = Bytes();
+        Expect.isTrue(newer.send(Bytes.fromString("deckpad 2 attach a newer host"), 5000) && newer.receive(told, 5000) > 0);
+        Expect.isTrue(NetworkProtocol.versionRefusal(told.toString()) && NetworkProtocol.versionRefusal("127.0.0.1 " + told.toString()));
+        newer.close();
+        var other = SecureChannel.connect(TCPStream.connectHost("127.0.0.1", port, 5000), SigningKey.generate(), 5000);
+        Bytes nothing = Bytes();
+        Expect.isTrue(other.send(Bytes.fromString("something else entirely"), 5000) && other.receive(nothing, 2500) <= 0);  // not this program: no answer
+        other.close();
+        Expect.isTrue(!NetworkProtocol.versionRefusal(NetworkProtocol.refusedBusy()) && !NetworkProtocol.otherVersion(NetworkProtocol.greeting() + "x"));
 
         // The control interface asks for its token.
         bool refused = false;

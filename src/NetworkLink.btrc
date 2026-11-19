@@ -75,6 +75,12 @@ class NetworkLink implements IControllerLink {
         SecureChannel channel = SecureChannel.accept(stream, self.identity, 1500);
         Bytes hello = Bytes();
         if (channel.receive(hello, 1500) <= 0 || !hello.toString().startsWith(NetworkProtocol.greeting())) {
+            if (NetworkProtocol.otherVersion(hello.toString())) {  // most likely one machine was updated and the other not
+                channel.send(Bytes.fromString(NetworkProtocol.refusedVersion()), 1500);
+                string refusal = f"deckpad: turned away a host of another version ({channel.peer().fingerprint()}): it said `{hello.toString().substring(0, hello.length() < 24 ? hello.length() : 24)}`";
+                if (!refusal.equals(self.turnedAway)) { Console.error(refusal); }
+                self.turnedAway = refusal;
+            }
             channel.close();
             return null;
         }
@@ -140,6 +146,13 @@ class NetworkLink implements IControllerLink {
             if (stream != null) { stream.close(); }
             /* The relay feeds the export and carries what it answers. */
             if (!relay.step() || !exported.step() || !relay.step()) { self.drop(); }
+            return;
+        }
+        /* Proving keys waits on the host for up to three seconds. While another
+         * link is being served that wait would be the attached host's, so a host
+         * that dials then is hung up on; one that comes to pair is still heard. */
+        if (stream != null && self.gate.busyElsewhere() && !self.pairing.window().isOpen()) {
+            stream.close();
             return;
         }
         if (stream != null) { self.arrive(stream); }

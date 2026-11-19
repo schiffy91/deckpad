@@ -84,6 +84,7 @@ in pkgs.testers.runNixOSTest {
     environment.systemPackages = [ programs.deckpad ];
     systemd.services.deckpad-attach.serviceConfig = {
       ExecStart = "${deckpad} attach deck --watch";
+      ExecReload = "${pkgs.coreutils}/bin/kill -HUP $MAINPID";  # what the module's unit does when a switch changes it
       ExecStopPost = "${deckpad} detach";
       StateDirectory = "deckpad";
       Restart = "always";
@@ -126,6 +127,23 @@ in pkgs.testers.runNixOSTest {
         pc.succeed("grep -qx 28de /sys/bus/usb/devices/*/idVendor && grep -qx 1302 /sys/bus/usb/devices/*/idProduct")
         reads_reports(pc)
         assert '"holder": "network"' in deck.succeed("deckpad status")
+
+    with subtest("the network: a reload leaves an attached controller alone and takes effect once it is free"):
+        attached = pc.succeed("systemctl show -p MainPID --value deckpad-attach.service").strip()
+        pc.succeed("systemctl reload deckpad-attach.service")
+        pc.succeed("sleep 6")
+        assert pc.succeed("systemctl show -p MainPID --value deckpad-attach.service").strip() == attached
+        pc.succeed(controller_present(pc, "FXDK00000001"))
+        reads_reports(pc)
+        deck.succeed("systemctl stop deckpad.service")
+        pc.wait_until_succeeds(f"pid=$(systemctl show -p MainPID --value deckpad-attach.service); test \"$pid\" != 0 && test \"$pid\" != {attached}", timeout=60)
+        pc.succeed("journalctl -u deckpad-attach.service --no-pager | grep -q 'a newer build is installed'")
+        idle = pc.succeed("systemctl show -p MainPID --value deckpad-attach.service").strip()
+        pc.succeed("systemctl reload deckpad-attach.service")  # with nothing attached it leaves at once
+        pc.wait_until_succeeds(f"pid=$(systemctl show -p MainPID --value deckpad-attach.service); test \"$pid\" != 0 && test \"$pid\" != {idle}", timeout=30)
+        deck.succeed("systemctl start deckpad.service")
+        pc.wait_until_succeeds(controller_present(pc, "FXDK00000001"), timeout=120)
+        reads_reports(pc)
 
     with subtest("the network: the host comes back by itself when the controller restarts"):
         deck.succeed("systemctl restart deckpad.service")
