@@ -128,6 +128,12 @@ session. A host of another version of the program (one machine updated, the
 other not) is told `refused: version`, the Deck logs it once, and the host
 asks again once a minute, not every three seconds.
 
+**A link that dies.** A host that leaves says so and the controls go back at
+once. A link that dies without a word (Wi-Fi out of reach, a machine asleep) is
+noticed by probing: one probe after a second of silence, one a second, three
+unanswered, and at most five seconds of unacknowledged data. Both sides then
+let go, and the host starts dialling again.
+
 **Across an update.** A system switch does not end a session. On the Deck the
 service is started on demand and is not restarted when its build changes: the
 next start is the new build. On the PC `deckpad-attach` is asked to reload,

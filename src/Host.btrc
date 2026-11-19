@@ -112,7 +112,7 @@ class ControllerHost {
     private SecureChannel dial() {
         TCPStream stream = TCPStream.connectHost(self.host, self.port, 5000);
         stream.setNoDelay(true);
-        stream.setKeepAlive(true);
+        NetworkProtocol.watch(stream);
         return SecureChannel.connect(stream, self.identity, 5000);
     }
 

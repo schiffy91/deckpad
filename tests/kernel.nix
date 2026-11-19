@@ -145,6 +145,15 @@ in pkgs.testers.runNixOSTest {
         pc.wait_until_succeeds(controller_present(pc, "FXDK00000001"), timeout=120)
         reads_reports(pc)
 
+    with subtest("the network: a link that dies without a word is let go within seconds, on both sides"):
+        pc.succeed("tc qdisc add dev eth1 root netem loss 100%")  # nothing the PC sends arrives, and nothing is refused
+        deck.wait_until_succeeds("deckpad status | grep -q '\"holder\": \"\"'", timeout=15)
+        pc.wait_until_fails(controller_present(pc, "FXDK00000001"), timeout=15)
+        pc.succeed("tc qdisc del dev eth1 root")
+        pc.wait_until_succeeds(controller_present(pc, "FXDK00000001"), timeout=120)
+        reads_reports(pc)
+        assert '"holder": "network"' in deck.succeed("deckpad status")
+
     with subtest("the network: the host comes back by itself when the controller restarts"):
         deck.succeed("systemctl restart deckpad.service")
         pc.wait_until_fails(controller_present(pc, "FXDK00000001"), timeout=60)

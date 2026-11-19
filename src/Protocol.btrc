@@ -1,3 +1,5 @@
+import Library.Network;
+
 // What the two sides say inside the secure channel before USB/IP starts: the
 // host names itself and asks to attach, and the controller answers.
 class NetworkProtocol {
@@ -8,6 +10,15 @@ class NetworkProtocol {
     class string refusedVersion() { return "refused: version: the controller speaks `deckpad 1`, the host something else; bring both machines to the same build"; }
     class bool versionRefusal(string said) { return said.contains("refused: version"); }  // also in a host's error, which names the controller first
     class bool otherVersion(string hello) { return hello.startsWith("deckpad ") && !hello.startsWith(NetworkProtocol.greeting()); }
+
+    // A link that died without a word (Wi-Fi out of reach, a machine asleep) is let go within about five
+    // seconds: a probe after one idle second, one a second, three unanswered; and unacknowledged data
+    // for five seconds. With the system's own timing the Deck's controls stayed taken for hours.
+    class void watch(TCPStream stream) {
+        stream.setKeepAlive(true);
+        stream.setKeepAliveTiming(1, 1, 3);
+        stream.setUnacknowledgedTimeout(5000);
+    }
 
     // The device id USB/IP gives the controller: bus 1, device 2.
     class long long deviceId() { return 0x10002LL; }

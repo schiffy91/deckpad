@@ -106,7 +106,7 @@ class NetworkLink implements IControllerLink {
             return;
         }
         stream.setNoDelay(true);
-        stream.setKeepAlive(true);
+        NetworkProtocol.watch(stream);
         SecureChannel? channel = null;
         try { channel = self.admit(stream); } catch (string error) { Console.error(f"deckpad: {stream.peer().toString()}: {error}"); }
         if (channel == null) { return; }
