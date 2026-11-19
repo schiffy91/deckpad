@@ -150,9 +150,7 @@ in {
       systemd.services.deckpad-attach = {
         description = "Attach the Steam Deck's controller";
         reloadIfChanged = true;  # a switch asks; the service leaves for the new build once no controller is attached
-        wantedBy = [ "multi-user.target" ];
-        after = [ "network-online.target" ];
-        wants = [ "network-online.target" ];
+        wantedBy = [ "multi-user.target" ];  # it does not wait for the network, which a boot would then wait for too: it dials until the Deck answers
         serviceConfig = {
           # Keys named in the configuration are trusted before the first attach.
           ExecStartPre = map (line: "${deckpad} trust-local ${lib.escapeShellArg line}") cfg.trustedKeys;
