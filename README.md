@@ -13,7 +13,8 @@ all through Steam Input. It reaches the other machine three ways:
 
 It is written in BTRC on the standard library's `USB`, `HID`, `Bluetooth`,
 `Network`, `Crypto` and `HTTP` groups. Beyond libc it links libsodium (keys
-and encryption on the network) and libdbus (BlueZ, and the tray).
+and encryption on the network) and libdbus (BlueZ, and the tray); the screen
+program links libX11.
 
 ## Using it
 
@@ -65,13 +66,13 @@ uses the layouts saved for those.
   each time the controller reconnects.
 - A Proton game started outside Steam sees the controller only through
   Steam's virtual gamepad, which Proton ignores unless Steam launched the
-  game or `PROTON_NO_STEAMINPUT=0` is set. This repository's Proton launch
-  wrapper (`proton-session`) sets it for every game Steam did not start, so
-  one started from the desktop follows the Gamepad set.
+  game or `PROTON_NO_STEAMINPUT=0` is set. The Proton launch wrapper of
+  schiffy91/nixos (`proton-session`) sets it for every game Steam did not
+  start, so one started from the desktop follows the Gamepad set.
 - For the Desktop Layout, Steam types and moves the pointer through the X
   server, and KWin asks whether it may ("Steam is asking to control…"). The
-  Steam module declares the answer on Plasma hosts, because plasma-manager
-  rewrites `kwinrc`, where KWin keeps it.
+  Steam module of schiffy91/nixos declares the answer on Plasma hosts,
+  because plasma-manager rewrites `kwinrc`, where KWin keeps it.
 
 ## How it works
 
@@ -168,7 +169,7 @@ firmware when its build time is not that of the firmware Steam ships
 (`bin/hardwareupdater/IBEX_FW_<time>.fw`), and leaves boards older than
 revision 68 alone. This controller cannot take firmware, and an offer that is
 accepted fails. So it reports board revision 67 and the build time of the
-firmware current in November 2026, and
+firmware current at the start of November 2026, and
 `hardwareupdater.x86_64 --check-for-updates` lists nothing for it. Of what a
 host sends, only rumble and haptics reach the Deck's own controller; an
 update attempt cannot touch its firmware.
@@ -218,8 +219,8 @@ trusted keys in `/var/lib/deckpad`. The module persists nothing itself.
 
 ## To do
 
-[`TODO.md`](TODO.md) lists what is planned and not built: at present, the trackpad as a
-pointer without Steam on the host.
+What is planned, and what has not been checked on real hardware, is in the
+[issues](https://github.com/schiffy91/deckpad/issues).
 
 ## Repository
 
@@ -241,7 +242,7 @@ ci/                the jobs a local pass can stand in for
   what counts as the pad being in use. The server test runs the real program
   and is a host for it over loopback: refused before pairing, paired while the
   window is open, attached through the encrypted tunnel, then enumeration,
-  250 reports a second in order with a bound on their age, outputs,
+  at least 100 reports a second in order with a bound on their age, outputs,
   reconnecting, a second host turned away, a host of another version told
   so, and forgetting. A host that dials in silence while another link holds
   the controller costs the service's turns nothing (under 200 ms where a
@@ -303,12 +304,6 @@ under 8 ms); the Steam client opened the controller on both links and
 offered it no firmware. The PC's kernel (7.3) binds `28de:1302` with
 `hid-steam`; an older kernel leaves it to `hid-generic`, and Steam reads
 hidraw itself either way.
-
-Still not verified: step 3 by hand (sticks, pads, gyro and rumble as felt in
-Steam's test screen), and a real Bluetooth radio; the Steam client has only
-been shown accepting a Deck as this controller over Bluetooth by the project
-credited below. The report layouts follow SDL and `hid-steam`, and SDL's
-driver reads them in the VM test.
 
 The network channel's construction (SIGMA-I over libsodium) has not been
 audited.
