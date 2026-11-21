@@ -216,6 +216,11 @@ trusted keys in `/var/lib/deckpad`. The module persists nothing itself.
 `packages.<system>.artwork` is the pictures for a Steam shortcut (`icon.png`, `p.png`, `landscape.png`,
 `_hero.png`, `_logo.png`); on the Deck the shortcut runs `/run/current-system/sw/bin/deckpad-toggle`.
 
+## To do
+
+[`TODO.md`](TODO.md) lists what is planned and not built: at present, the trackpad as a
+pointer without Steam on the host.
+
 ## Repository
 
 ```
