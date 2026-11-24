@@ -73,13 +73,21 @@ def expect_events(expected):
         if got == expected:
             quiet = quiet or time.monotonic()
             if time.monotonic() - quiet >= 0.15:
+                held = {key for device in devices for key in device.active_keys()}
+                for (kind, key), values in expected.items():
+                    if kind == E.EV_KEY:
+                        assert (key in held) == bool(values[-1]), (key, held, values)
                 return
         else:
             quiet = None
         ready, _, _ = select.select(devices, [], [], 0.03)
         for device in ready:
             for event in device.read():
-                if event.type in (E.EV_REL, E.EV_KEY) and (event.type, event.code) != (E.EV_REL, E.REL_WHEEL_HI_RES):
+                if event.type == E.EV_KEY and event.value == 2:
+                    continue  # Linux auto-repeat while the fixture is held.
+                if event.type == E.EV_REL and event.code == E.REL_WHEEL_HI_RES:
+                    continue  # Linux also reports the same wheel step at high resolution.
+                if event.type in (E.EV_REL, E.EV_KEY):
                     got.setdefault((event.type, event.code), []).append(event.value)
     raise AssertionError(f"desktop events {got}, expected {expected}")
 
