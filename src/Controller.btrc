@@ -3,6 +3,7 @@ import Library.FileSystem;
 import Library.HID;
 import Library.Strings;
 import Library.Timer;
+import ./DesktopInput.btrc;
 import ./PadSource.btrc;
 import ./PadState.btrc;
 import ./SteamController.btrc;
@@ -51,6 +52,8 @@ class VirtualController implements IHIDDevice {
     private IPadSource source;
     private SteamController identity;
     private PadLatch latch;
+    private DesktopInput desktop;
+    private bool lastWasDesktop = false;
     private PadUse use;
     private bool sendQuickAccess;
     private bool active = false;
@@ -70,6 +73,7 @@ class VirtualController implements IHIDDevice {
         self.source = source;
         self.identity = identity;
         self.latch = PadLatch();
+        self.desktop = DesktopInput();
         self.use = PadUse();
         self.sendQuickAccess = sendQuickAccess;
     }
@@ -78,6 +82,8 @@ class VirtualController implements IHIDDevice {
     public SteamController personality() { return self.identity; }
 
     public bool attached() { return self.active; }
+
+    public bool desktopActive() { return self.desktop.active(); }
 
     // Holding the Deck's ... button for two seconds asks the service to stop.
     public bool stopRequested() { return self.stop; }
@@ -90,6 +96,10 @@ class VirtualController implements IHIDDevice {
         if (self.active) { throw "The controller is already in use"; }
         self.source.open();
         self.active = true;
+        self.identity.resetDesktop();
+        self.desktop = DesktopInput();
+        self.latch = PadLatch();
+        self.lastWasDesktop = false;
         self.battery = DeckBattery.find();
         self.batteryDueAt = 0LL;
         self.quickAccessSince = 0LL;
@@ -108,6 +118,7 @@ class VirtualController implements IHIDDevice {
         if (!self.active) { return; }
         PadState state = PadState();
         long long now = MonotonicClock.milliseconds();
+        self.desktop.enable(self.identity.desktopEnabled(now));
         if (self.source.read(state, timeoutMilliseconds)) {
             now = MonotonicClock.milliseconds();
             if ((state.buttons & PAD_QUICK_ACCESS) != 0) {
@@ -117,6 +128,7 @@ class VirtualController implements IHIDDevice {
             self.use.see(state, now);
             if (!self.sendQuickAccess) { state.buttons &= ~PAD_QUICK_ACCESS; }
             self.latch.update(state);
+            self.desktop.update(state);
         }
         if (self.rumbleExpiresAt != 0LL && now >= self.rumbleExpiresAt) {
             self.wantedLeft = 0; self.wantedRight = 0; self.rumbleExpiresAt = 0LL;
@@ -170,7 +182,9 @@ class VirtualController implements IHIDDevice {
     public bool setFeature(Bytes data) {
         if (data.length() < 1 || data.get(0) != STEAM_REPORT_FEATURE) { return false; }
         HostEffect effect = HostEffect();
-        self.identity.setFeature(data);
+        long long now = MonotonicClock.milliseconds();
+        self.identity.setFeature(data, now);
+        self.desktop.enable(self.identity.desktopEnabled(now));
         self.identity.featureEffect(data, effect);
         self.apply(effect);
         return true;
@@ -189,6 +203,7 @@ class VirtualController implements IHIDDevice {
     }
 
     public bool getReport(int kind, int id, Bytes report) {
+        if (kind == HID_REPORT_INPUT) { return self.desktop.snapshot(id, report); }
         if (kind != HID_REPORT_FEATURE) { return false; }
         Bytes raw = Bytes();
         int length = self.feature(id, raw);
@@ -200,7 +215,6 @@ class VirtualController implements IHIDDevice {
     public bool setReport(int kind, int id, Bytes report) {
         Bytes raw = report.length() > 64 ? report.slice(0, 64) : report.slice(0, report.length());
         if (kind == HID_REPORT_FEATURE) {
-            while (raw.length() < 64) { raw.append(0); }
             return self.setFeature(raw);
         }
         if (kind != HID_REPORT_OUTPUT) { return false; }
@@ -209,8 +223,14 @@ class VirtualController implements IHIDDevice {
     }
 
     public bool nextInput(Bytes report) {
+        // Give each stream a turn even during a continuous swipe or a slow link.
+        if (!self.lastWasDesktop && self.desktop.next(report)) {
+            self.lastWasDesktop = true;
+            return true;
+        }
         HidReport next = HidReport();
-        if (!self.input(next)) { return false; }
+        if (!self.input(next)) { return self.desktop.next(report); }
+        self.lastWasDesktop = false;
         report.appendBytes(next.bytes.slice(0, next.length));
         return true;
     }
@@ -224,6 +244,7 @@ class ControllerPort implements IHIDDevice {
     private bool live = false;
     private int stateReport;
     private int stateLength;
+    private Bytes? radioPending = null;
 
     // The state report travels under another ID and length on some buses:
     // Bluetooth carries it as report 0x45, without the trailing orientation.
@@ -238,23 +259,49 @@ class ControllerPort implements IHIDDevice {
     // Whether another link's host holds the controller.
     public bool busyElsewhere() { return self.controller.attached() && !self.live; }
 
-    public void hold(bool live) { self.live = live; }
+    public void hold(bool live) {
+        self.live = live;
+        if (!live) { self.radioPending = null; }
+    }
+
+    // L2CAP can decline a nonblocking write after asking for the next input.
+    // Retain desktop edges and relative motion until the radio accepts them.
+    public void radioSent() { self.radioPending = null; }
 
     public bool holding() { return self.live; }
 
     public Bytes reportDescriptor() { return self.controller.reportDescriptor(); }
 
-    public bool getReport(int kind, int id, Bytes report) { return self.controller.getReport(kind, id, report); }
+    public bool getReport(int kind, int id, Bytes report) {
+        if (kind == HID_REPORT_INPUT && !self.live) {
+            if (id != DESKTOP_MOUSE && id != DESKTOP_KEYBOARD) { return false; }
+            report.append(id);
+            report.appendBytes(Bytes.zeros(id == DESKTOP_MOUSE ? 6 : 1));
+            return true;
+        }
+        return self.controller.getReport(kind, id, report);
+    }
 
-    public bool setReport(int kind, int id, Bytes report) { return self.controller.setReport(kind, id, report); }
+    public bool setReport(int kind, int id, Bytes report) {
+        if (self.busyElsewhere()) { return false; }
+        bool desktop = self.controller.desktopActive();
+        bool accepted = self.controller.setReport(kind, id, report);
+        if (desktop && !self.controller.desktopActive()) { self.radioPending = null; }
+        return accepted;
+    }
 
     public bool nextInput(Bytes report) {
         if (!self.live) { return false; }
+        Bytes? retry = self.radioPending;
+        if (retry != null) { report.appendBytes(retry); return true; }
         Bytes next = Bytes();
         if (!self.controller.nextInput(next)) { return false; }
         if (next.get(0) == STEAM_REPORT_STATE && self.stateReport != STEAM_REPORT_STATE) {
             next.set(0, self.stateReport);
             next = next.slice(0, self.stateLength);
+        }
+        if (self.stateReport == STEAM_REPORT_STATE_BLUETOOTH && (next.get(0) == DESKTOP_MOUSE || next.get(0) == DESKTOP_KEYBOARD)) {
+            self.radioPending = next;
         }
         report.appendBytes(next);
         return true;

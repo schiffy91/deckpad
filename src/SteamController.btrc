@@ -1,11 +1,12 @@
 import Library.Bytes;
 import Library.Vector;
+import ./DesktopInput.btrc;
 import ./PadSource.btrc;
 import ./PadState.btrc;
 import ./Wire.btrc;
 
-// The 2026 Steam Controller as a host sees it over HID: one vendor collection of
-// reports, the same on every link. How those reports travel (USB descriptors and
+// The 2026 Steam Controller as a host sees it over HID: Valve's controller reports
+// and the standard desktop input collections, the same on every link. How those reports travel (USB descriptors and
 // transfers, Bluetooth channels) belongs to the link, not here.
 // Report IDs and layouts follow SDL's Steam Controller driver and hid-steam.c;
 // the Deck-to-controller mapping follows jmedina21/deck-as-controller (MIT).
@@ -17,6 +18,7 @@ enum {
     STEAM_OUT_TONE = 0x83, STEAM_OUT_SWEEP = 0x84, STEAM_OUT_SCRIPT = 0x85,
     STEAM_GET_ATTRIBUTES = 0x83, STEAM_SET_SETTINGS = 0x87, STEAM_GET_SETTINGS = 0x89,
     STEAM_HAPTIC_PULSE = 0x8F, STEAM_GET_STRING = 0xAE, STEAM_RUMBLE = 0xEB,
+    STEAM_LOAD_DEFAULTS = 0x8E,
     STEAM_SERIAL_LENGTH = 20,
     // Steam's hardware updater offers firmware to a controller whose build
     // time is not that of the firmware it ships (IBEX_FW_<time>.fw), unless
@@ -45,12 +47,28 @@ class SteamController {
     private Bytes commandMemory;
     private Vector<int> settings = [];
     private int sequence = 0;
+    private long long disabledAt = 0LL;
 
     public SteamController(string serial) {
         if (serial.isEmpty() || serial.length() > STEAM_SERIAL_LENGTH) { throw "Controller serial must be 1 to 20 characters"; }
         self.serialNumber = serial;
         self.commandMemory = Wire.zeros(64);
         for (int index = 0; index < 256; index++) { self.settings.push(0); }
+        self.resetDesktop();
+    }
+
+    public void resetDesktop() {
+        self.settings.set(DECK_SETTING_LIZARD_MODE, 1);
+        self.settings.set(DECK_SETTING_WATCHDOG, 1);
+        self.disabledAt = 0LL;
+    }
+
+    // SDL's Triton driver renews its disable every three seconds. Linux can
+    // turn off the watchdog in the same write, then explicitly load defaults.
+    public bool desktopEnabled(long long now) {
+        if (self.settings.get(DECK_SETTING_LIZARD_MODE) == 0 && self.settings.get(DECK_SETTING_WATCHDOG) != 0
+            && now - self.disabledAt >= 5000LL) { self.resetDesktop(); }
+        return self.settings.get(DECK_SETTING_LIZARD_MODE) != 0;
     }
 
     class void vendorReports(Bytes out, int item, int identifier, int length) {
@@ -60,7 +78,7 @@ class SteamController {
         out.append(item); out.append(0x02);
     }
 
-    // One vendor collection of byte arrays, like the real controller's. Lengths
+    // The vendor collection comes first on the unified interface. Lengths
     // exclude the report ID; hid-steam requires the feature report to be 63.
     public int reportDescriptor(Bytes out) {
         out.clear();
@@ -84,6 +102,7 @@ class SteamController {
         SteamController.vendorReports(out, 0x91, 0x89, 63);
         SteamController.vendorReports(out, 0xB1, STEAM_REPORT_FEATURE, 63);
         out.append(0xC0);
+        DesktopInput.describe(out);
         return out.length();
     }
 
@@ -133,20 +152,21 @@ class SteamController {
     }
 
     // The host wrote feature report 1: a command, answered by the next read.
-    public void setFeature(Bytes data) {
-        if (data.length() < 3 || data.get(0) != STEAM_REPORT_FEATURE) { return; }
+    public void setFeature(Bytes data, long long now = 0LL) {
+        if (data.length() < 2 || data.get(0) != STEAM_REPORT_FEATURE) { return; }
         Wire.resetZeros(self.commandMemory, 64);
         int copyCount = data.length() - 1 > 63 ? 63 : data.length() - 1;
         for (int index = 0; index < copyCount; index++) {
             self.commandMemory.set(index, data.get(index + 1));
         }
-        if (self.commandMemory.get(0) != STEAM_SET_SETTINGS) { return; }
-        // <register> <value: u16>, repeated. The daemon already runs the Deck's
-        // controller the way Steam asks for here, so the values are only kept.
-        int count = Wire.clamp(self.commandMemory.get(1), 0, 60);
+        if (self.commandMemory.get(0) == STEAM_LOAD_DEFAULTS) { self.resetDesktop(); }
+        if (self.commandMemory.get(0) != STEAM_SET_SETTINGS || copyCount < 2) { return; }
+        // Each complete tuple is a register and a little-endian 16-bit value.
+        int count = Wire.clamp(self.commandMemory.get(1), 0, copyCount - 2);
         for (int index = 0; index + 2 < count; index += 3) {
             int registerIndex = self.commandMemory.get(2 + index);
             self.settings.set(registerIndex, Wire.u16le(self.commandMemory, 3 + index));
+            if (registerIndex == DECK_SETTING_LIZARD_MODE || registerIndex == DECK_SETTING_WATCHDOG) { self.disabledAt = now; }
         }
     }
 

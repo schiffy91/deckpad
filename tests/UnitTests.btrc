@@ -17,6 +17,7 @@ import deckpad.NetworkLink;
 import deckpad.PadSource;
 import deckpad.PadState;
 import deckpad.Service;
+import deckpad.DesktopInput;
 import deckpad.SteamController;
 import deckpad.Trust;
 import deckpad.Wire;
@@ -153,10 +154,75 @@ class DeckpadUnitTests {
         Bytes out = Bytes();
         var controller = SteamController("FXDK00000042");
         int length = controller.reportDescriptor(out);
-        Expect.isTrue(length == 143 && out.get(0) == 0x06 && out.get(2) == 0xFF && out.get(length - 1) == 0xC0);
+        Expect.isTrue(length > 143 && out.get(0) == 0x06 && out.get(2) == 0xFF && out.get(143 - 1) == 0xC0);
         Expect.isTrue(out.get(15) == 0x42 && out.get(19) == 53);
-        Expect.isTrue(out.get(length - 8) == 0x01 && out.get(length - 4) == 63 && out.get(length - 3) == 0xB1);
+        Expect.isTrue(out.get(143 - 8) == 0x01 && out.get(143 - 4) == 63 && out.get(143 - 3) == 0xB1);
         Expect.isTrue(controller.vendor() == 0x28DE && controller.product() == 0x1302 && controller.serial().equals("FXDK00000042"));
+    }
+
+    class Bytes nextDesktop(DesktopInput desktop, int id) {
+        Bytes report = Bytes();
+        Expect.isTrue(desktop.next(report));
+        Expect.intEq(report.get(0), id);
+        return report;
+    }
+
+    class void desktopInput() {
+        var desktop = DesktopInput();
+        var state = PadState();
+        state.buttons = PAD_LEFT_PAD_TOUCH | PAD_RIGHT_PAD_TOUCH;
+        state.rightPadX = -30000;
+        desktop.update(state);
+        Expect.isFalse(desktop.next(Bytes()));
+        // Multiple subpixel samples before one host poll accumulate.
+        state.rightPadX += 64;
+        desktop.update(state);
+        state.rightPadX += 64;
+        state.rightPadY = 256;
+        state.leftPadY = 2048;
+        desktop.update(state);
+        Bytes snapshot = Bytes();
+        Expect.isTrue(desktop.snapshot(DESKTOP_MOUSE, snapshot) && snapshot.toHex().equals("10000000000000"));
+        Bytes mouse = DeckpadUnitTests.nextDesktop(desktop, DESKTOP_MOUSE);
+        Expect.isTrue(Wire.s16le(mouse, 2) == 1 && Wire.s16le(mouse, 4) == -2 && mouse.get(6) == 1);
+        state.buttons = PAD_A | PAD_UP | PAD_R2;
+        desktop.update(state);
+        state.buttons = 0;
+        desktop.update(state);
+        Expect.intEq(DeckpadUnitTests.nextDesktop(desktop, DESKTOP_KEYBOARD).get(1), 17);
+        Expect.intEq(DeckpadUnitTests.nextDesktop(desktop, DESKTOP_MOUSE).get(1), 1);
+        Expect.intEq(DeckpadUnitTests.nextDesktop(desktop, DESKTOP_KEYBOARD).get(1), 0);
+        Expect.intEq(DeckpadUnitTests.nextDesktop(desktop, DESKTOP_MOUSE).get(1), 0);
+        state.buttons = PAD_A | PAD_L2;
+        desktop.update(state);
+        DeckpadUnitTests.nextDesktop(desktop, DESKTOP_KEYBOARD);
+        Expect.intEq(DeckpadUnitTests.nextDesktop(desktop, DESKTOP_MOUSE).get(1), 2);
+        desktop.enable(false);
+        desktop.enable(true);
+        desktop.update(state);
+        Expect.intEq(DeckpadUnitTests.nextDesktop(desktop, DESKTOP_KEYBOARD).get(1), 0);
+        Expect.intEq(DeckpadUnitTests.nextDesktop(desktop, DESKTOP_MOUSE).get(1), 0);
+        Expect.isFalse(desktop.next(Bytes()));
+        state.buttons = PAD_RIGHT_PAD_TOUCH;
+        state.rightPadX = 30000;
+        desktop.update(state);
+        Expect.isFalse(desktop.next(Bytes()));
+    }
+
+    class void watchdog() {
+        var identity = SteamController("test");
+        Bytes request = DeckpadUnitTests.feature(STEAM_SET_SETTINGS, 3, DECK_SETTING_LIZARD_MODE);
+        identity.setFeature(request, 1000LL);
+        Expect.isFalse(identity.desktopEnabled(4000LL));
+        identity.setFeature(request, 4000LL);
+        Expect.isFalse(identity.desktopEnabled(8999LL));
+        Expect.isTrue(identity.desktopEnabled(9000LL));
+        request.set(2, 6);
+        request.set(6, DECK_SETTING_WATCHDOG);
+        identity.setFeature(request, 10000LL);
+        Expect.isFalse(identity.desktopEnabled(20000LL));
+        identity.setFeature(DeckpadUnitTests.feature(STEAM_LOAD_DEFAULTS, 0, 0).slice(0, 2), 21000LL);
+        Expect.isTrue(identity.desktopEnabled(21000LL));
     }
 
     class void command(Bytes out, int identifier, int length) {
@@ -290,17 +356,18 @@ class DeckpadUnitTests {
         Expect.isTrue(device.control(USBSetup(0x80, USB_REQUEST_GET_DESCRIPTOR, 0x0100, 0, 18), descriptor) == 18 && Wire.u16le(descriptor, 8) == STEAM_VENDOR && Wire.u16le(descriptor, 10) == STEAM_PRODUCT);
         Expect.intEq(device.control(USBSetup(0x80, USB_REQUEST_GET_DESCRIPTOR, 0x0100, 0, 8), Bytes()), 8);
         Bytes configuration = Bytes();
-        Expect.isTrue(device.control(USBSetup(0x80, USB_REQUEST_GET_DESCRIPTOR, 0x0200, 0, 255), configuration) == 41 && configuration.get(14) == 3 && configuration.get(25) == 143);
+        Expect.isTrue(device.control(USBSetup(0x80, USB_REQUEST_GET_DESCRIPTOR, 0x0200, 0, 255), configuration) == 41 && configuration.get(14) == 3 && Wire.u16le(configuration, 25) == port.reportDescriptor().length());
         Vector<USBEndpoint> endpoints = USBEndpoint.listed(configuration);
         Expect.isTrue(endpoints.len == 2 && endpoints.get(0).address == 0x81 && endpoints.get(1).address == 0x01 && endpoints.get(0).interval == 1 && endpoints.get(0).maxPacket == 64);
         Bytes product = Bytes();
         Expect.isTrue(device.control(USBSetup(0x80, USB_REQUEST_GET_DESCRIPTOR, 0x0302, 0x0409, 255), product) == 34 && product.get(2) == 'S');
         Bytes serial = Bytes();
         Expect.isTrue(device.control(USBSetup(0x80, USB_REQUEST_GET_DESCRIPTOR, 0x0303, 0x0409, 255), serial) == 26 && serial.get(2) == 'F' && serial.get(24) == '2');
-        Expect.intEq(device.control(USBSetup(0x81, USB_REQUEST_GET_DESCRIPTOR, 0x2200, 0, 255), Bytes()), 143);
+        Expect.intEq(device.control(USBSetup(0x81, USB_REQUEST_GET_DESCRIPTOR, 0x2200, 0, 512), Bytes()), port.reportDescriptor().length());
         Expect.intEq(device.control(USBSetup(0x80, USB_REQUEST_GET_DESCRIPTOR, 0x0600, 0, 10), Bytes()), USB_CONTROL_STALL);
         Expect.isTrue(device.control(USBSetup(0x00, USB_REQUEST_SET_CONFIGURATION, 1, 0, 0), Bytes()) == 0 && device.configured());
         controller.attach();
+        port.hold(true);
         Expect.intEq(device.control(USBSetup(0x21, 0x09, 0x0301, 0, 64), DeckpadUnitTests.feature(STEAM_GET_STRING, 0x15, 1)), 64);
         Bytes reply = Bytes();
         Expect.isTrue(device.control(USBSetup(0xA1, 0x01, 0x0301, 0, 64), reply) == 64 && reply.get(1) == STEAM_GET_STRING && reply.get(4) == 'F');
@@ -314,6 +381,7 @@ class DeckpadUnitTests {
         Expect.intEq(pad.commands, 2);
         // Reports leave only through the link that holds the controller.
         controller.pump(8);
+        port.hold(false);
         Expect.isFalse(device.produce(0x81, Bytes()));
         port.hold(true);
         Bytes battery = Bytes();
@@ -342,6 +410,37 @@ class DeckpadUnitTests {
         BluetoothHIDRecord record = BluetoothHIDRecord("Steam Controller", port.reportDescriptor()).identified(STEAM_VENDOR, STEAM_PRODUCT_BLUETOOTH, 0x0100);
         Expect.isTrue(record.deviceID().equals("usb:28DE:1303:0100") && record.xml().contains("0600ff0901a101"));
         Expect.isTrue(HIDReportDescriptor.numbered(port.reportDescriptor()));
+    }
+
+    class void bluetoothRetry() {
+        var controller = VirtualController(HeldPad(), SteamController("retry"), false);
+        var port = ControllerPort(controller, STEAM_REPORT_STATE_BLUETOOTH, STEAM_STATE_LENGTH_BLUETOOTH);
+        controller.attach();
+        port.hold(true);
+        controller.pump(8);
+        Bytes first = Bytes();
+        Bytes retry = Bytes();
+        Expect.isTrue(port.nextInput(first) && first.get(0) == DESKTOP_KEYBOARD && first.get(1) == 2);
+        Expect.isTrue(port.nextInput(retry) && retry.toHex().equals(first.toHex()));
+        port.radioSent();
+        Bytes next = Bytes();
+        Expect.isTrue(port.nextInput(next) && next.get(0) != DESKTOP_KEYBOARD);
+        Bytes off = DeckpadUnitTests.feature(STEAM_SET_SETTINGS, 3, DECK_SETTING_LIZARD_MODE);
+        Expect.isTrue(port.setReport(HID_REPORT_FEATURE, STEAM_REPORT_FEATURE, off));
+        Bytes released = Bytes();
+        Expect.isTrue(port.nextInput(released) && released.get(0) == DESKTOP_KEYBOARD && released.get(1) == 0);
+        Bytes again = Bytes();
+        Expect.isTrue(port.nextInput(again) && again.toHex().equals(released.toHex()));
+        port.radioSent();
+        port.hold(false);
+        controller.detach();
+        controller.attach();
+        port.hold(true);
+        controller.pump(8);
+        Bytes fresh = Bytes();
+        Expect.isTrue(port.nextInput(fresh) && fresh.get(0) == DESKTOP_KEYBOARD && fresh.get(1) == 2);
+        port.hold(false);
+        controller.detach();
     }
 
     class bool missingIdentity(string path) {
@@ -536,11 +635,14 @@ int main() {
     DeckpadUnitTests.stateReport();
     DeckpadUnitTests.latch();
     DeckpadUnitTests.descriptors();
+    DeckpadUnitTests.desktopInput();
+    DeckpadUnitTests.watchdog();
     DeckpadUnitTests.features();
     DeckpadUnitTests.effects();
     DeckpadUnitTests.controller();
     DeckpadUnitTests.usbDevice();
     DeckpadUnitTests.bluetoothPort();
+    DeckpadUnitTests.bluetoothRetry();
     DeckpadUnitTests.pairing();
     DeckpadUnitTests.links();
     DeckpadUnitTests.dialledWhileHeld();

@@ -1,0 +1,146 @@
+import Library.Bytes;
+import Library.Vector;
+import ./PadState.btrc;
+import ./Wire.btrc;
+
+enum { DESKTOP_MOUSE = 0x10, DESKTOP_KEYBOARD = 0x11 };
+
+// Standard HID application collections on the 2026 controller's unified interface.
+// The keyboard has one bit per mapped key, so any combination can be held.
+class DesktopInput {
+    private Vector<Bytes> pending = [];
+    private bool enabled = true;
+    private int held = 0;
+    private int ignoreUntilUp = 0;
+    private int keys = 0;
+    private int buttons = 0;
+    private int sentKeys = 0;
+    private int sentButtons = 0;
+    private bool rightTouch = false;
+    private bool leftTouch = false;
+    private int rightX = 0;
+    private int rightY = 0;
+    private int leftY = 0;
+
+    public DesktopInput() {}
+
+    class void describe(Bytes out) {
+        // Mouse, two buttons, relative signed 16-bit X/Y and an 8-bit wheel.
+        for item in [0x05,1, 0x09,2, 0xA1,1, 0x85,DESKTOP_MOUSE, 0x09,1, 0xA1,0,
+                     0x05,9, 0x19,1, 0x29,2, 0x15,0, 0x25,1, 0x75,1, 0x95,2, 0x81,2,
+                     0x75,6, 0x95,1, 0x81,3, 0x05,1, 0x09,0x30, 0x09,0x31,
+                     0x16,1,0x80, 0x26,0xff,0x7f, 0x75,16, 0x95,2, 0x81,6,
+                     0x09,0x38, 0x15,0x81, 0x25,127, 0x75,8, 0x95,1, 0x81,6, 0xC0,0xC0] { out.append(item); }
+        // Enter, Escape, Space, Tab, Up, Down, Left, Right in that bit order.
+        for item in [0x05,1, 0x09,6, 0xA1,1, 0x85,DESKTOP_KEYBOARD, 0x05,7,
+                     0x09,0x28, 0x09,0x29, 0x09,0x2c, 0x09,0x2b, 0x09,0x52, 0x09,0x51,
+                     0x09,0x50, 0x09,0x4f, 0x15,0, 0x25,1, 0x75,1, 0x95,8, 0x81,2, 0xC0] { out.append(item); }
+    }
+
+    private void enqueue(Bytes report) {
+        // A host which stops polling cannot grow the queue indefinitely. On overflow
+        // synchronize it with both current states, dropping stale gestures.
+        if (self.pending.len >= 64) {
+            self.pending.clear();
+            self.pending.push(self.keyboard());
+            self.pending.push(self.mouse(0, 0, 0));
+            return;
+        }
+        self.pending.push(report);
+    }
+
+    private Bytes keyboard() {
+        Bytes report = Bytes();
+        report.append(DESKTOP_KEYBOARD);
+        report.append(self.keys);
+        return report;
+    }
+
+    private Bytes mouse(int dx, int dy, int wheel) {
+        Bytes report = Bytes();
+        report.append(DESKTOP_MOUSE);
+        report.append(self.buttons);
+        Wire.putU16le(report, 2, dx);
+        Wire.putU16le(report, 4, dy);
+        report.append(wheel & 0xff);
+        return report;
+    }
+
+    // GET_REPORT describes the state, so it never replays a relative movement.
+    public bool snapshot(int id, Bytes report) {
+        if (id == DESKTOP_MOUSE) { report.appendBytes(self.mouse(0, 0, 0)); return true; }
+        if (id == DESKTOP_KEYBOARD) { report.appendBytes(self.keyboard()); return true; }
+        return false;
+    }
+
+    public bool active() { return self.enabled; }
+
+    public void enable(bool value) {
+        if (self.enabled == value) { return; }
+        self.enabled = value;
+        self.rightTouch = false;
+        self.leftTouch = false;
+        self.ignoreUntilUp = self.held;
+        if (value) { return; }
+        self.pending.clear();
+        self.keys = 0;
+        self.buttons = 0;
+        if (self.sentKeys != 0) { self.enqueue(self.keyboard()); }
+        if (self.sentButtons != 0) { self.enqueue(self.mouse(0, 0, 0)); }
+    }
+
+    public void update(PadState state) {
+        self.held = state.buttons;
+        self.ignoreUntilUp &= self.held;
+        if (!self.enabled) { return; }
+        int pressed = self.held & ~self.ignoreUntilUp;
+        int keys = pressed & (PAD_A | PAD_B | PAD_X | PAD_Y);
+        if ((pressed & PAD_UP) != 0) { keys |= 16; }
+        if ((pressed & PAD_DOWN) != 0) { keys |= 32; }
+        if ((pressed & PAD_LEFT) != 0) { keys |= 64; }
+        if ((pressed & PAD_RIGHT) != 0) { keys |= 128; }
+        if (keys != self.keys) { self.keys = keys; self.enqueue(self.keyboard()); }
+
+        bool right = (self.held & PAD_RIGHT_PAD_TOUCH) != 0;
+        bool left = (self.held & PAD_LEFT_PAD_TOUCH) != 0;
+        int dx = right && self.rightTouch ? (state.rightPadX - self.rightX) / 128 : 0;
+        int dy = right && self.rightTouch ? (self.rightY - state.rightPadY) / 128 : 0;
+        int wheel = left && self.leftTouch ? (state.leftPadY - self.leftY) / 2048 : 0;
+        // Retain fractional motion within a touch. A new touch sets a fresh origin.
+        self.rightX = self.rightTouch ? self.rightX + dx * 128 : state.rightPadX;
+        self.rightY = self.rightTouch ? self.rightY - dy * 128 : state.rightPadY;
+        self.leftY = self.leftTouch ? self.leftY + wheel * 2048 : state.leftPadY;
+        self.rightTouch = right;
+        self.leftTouch = left;
+        int buttons = (pressed & (PAD_R2 | PAD_RIGHT_PAD_CLICK)) != 0 ? 1 : 0;
+        if ((pressed & PAD_L2) != 0) { buttons |= 2; }
+        if (buttons == self.buttons && dx == 0 && dy == 0 && wheel == 0) { return; }
+        self.buttons = buttons;
+        if (self.pending.len > 0) {
+            Bytes last = self.pending.last();
+            if (last.get(0) == DESKTOP_MOUSE && last.get(1) == buttons) {
+                int oldWheel = last.get(6);
+                int sumWheel = wheel + (oldWheel >= 128 ? oldWheel - 256 : oldWheel);
+                int sumX = Wire.s16le(last, 2) + dx;
+                int sumY = Wire.s16le(last, 4) + dy;
+                if (sumWheel >= -127 && sumWheel <= 127 && sumX >= -32767 && sumX <= 32767 && sumY >= -32767 && sumY <= 32767) {
+                    Wire.putU16le(last, 2, sumX);
+                    Wire.putU16le(last, 4, sumY);
+                    last.set(6, sumWheel & 0xff);
+                    return;
+                }
+            }
+        }
+        self.enqueue(self.mouse(dx, dy, wheel));
+    }
+
+    public bool next(Bytes out) {
+        if (self.pending.len == 0) { return false; }
+        Bytes first = self.pending.first();
+        out.appendBytes(first);
+        if (first.get(0) == DESKTOP_MOUSE) { self.sentButtons = first.get(1); }
+        else { self.sentKeys = first.get(1); }
+        self.pending.remove(0);
+        return true;
+    }
+}
