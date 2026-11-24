@@ -76,7 +76,9 @@ class BluetoothLink implements IControllerLink {
             self.pairingOn = open;
         }
         adapter.step();
+        int sent = pad.reportsSent();
         pad.step();
+        if (pad.reportsSent() != sent) { self.gate.radioSent(); }
         BluetoothAddress? peer = pad.peer();
         if (pad.connected() && peer != null && !self.host.equals(peer.toString())) {
             self.host = peer.toString();

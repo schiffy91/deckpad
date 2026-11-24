@@ -181,6 +181,8 @@ class DeckpadUnitTests {
         state.rightPadY = 256;
         state.leftPadY = 2048;
         desktop.update(state);
+        Bytes snapshot = Bytes();
+        Expect.isTrue(desktop.snapshot(DESKTOP_MOUSE, snapshot) && snapshot.toHex().equals("10000000000000"));
         Bytes mouse = DeckpadUnitTests.nextDesktop(desktop, DESKTOP_MOUSE);
         Expect.isTrue(Wire.s16le(mouse, 2) == 1 && Wire.s16le(mouse, 4) == -2 && mouse.get(6) == 1);
         state.buttons = PAD_A | PAD_UP | PAD_R2;
@@ -219,7 +221,7 @@ class DeckpadUnitTests {
         request.set(6, DECK_SETTING_WATCHDOG);
         identity.setFeature(request, 10000LL);
         Expect.isFalse(identity.desktopEnabled(20000LL));
-        identity.setFeature(DeckpadUnitTests.feature(STEAM_LOAD_DEFAULTS, 0, 0), 21000LL);
+        identity.setFeature(DeckpadUnitTests.feature(STEAM_LOAD_DEFAULTS, 0, 0).slice(0, 2), 21000LL);
         Expect.isTrue(identity.desktopEnabled(21000LL));
     }
 
@@ -408,6 +410,37 @@ class DeckpadUnitTests {
         BluetoothHIDRecord record = BluetoothHIDRecord("Steam Controller", port.reportDescriptor()).identified(STEAM_VENDOR, STEAM_PRODUCT_BLUETOOTH, 0x0100);
         Expect.isTrue(record.deviceID().equals("usb:28DE:1303:0100") && record.xml().contains("0600ff0901a101"));
         Expect.isTrue(HIDReportDescriptor.numbered(port.reportDescriptor()));
+    }
+
+    class void bluetoothRetry() {
+        var controller = VirtualController(HeldPad(), SteamController("retry"), false);
+        var port = ControllerPort(controller, STEAM_REPORT_STATE_BLUETOOTH, STEAM_STATE_LENGTH_BLUETOOTH);
+        controller.attach();
+        port.hold(true);
+        controller.pump(8);
+        Bytes first = Bytes();
+        Bytes retry = Bytes();
+        Expect.isTrue(port.nextInput(first) && first.get(0) == DESKTOP_KEYBOARD && first.get(1) == 2);
+        Expect.isTrue(port.nextInput(retry) && retry.toHex().equals(first.toHex()));
+        port.radioSent();
+        Bytes next = Bytes();
+        Expect.isTrue(port.nextInput(next) && next.get(0) != DESKTOP_KEYBOARD);
+        Bytes off = DeckpadUnitTests.feature(STEAM_SET_SETTINGS, 3, DECK_SETTING_LIZARD_MODE);
+        Expect.isTrue(port.setReport(HID_REPORT_FEATURE, STEAM_REPORT_FEATURE, off));
+        Bytes released = Bytes();
+        Expect.isTrue(port.nextInput(released) && released.get(0) == DESKTOP_KEYBOARD && released.get(1) == 0);
+        Bytes again = Bytes();
+        Expect.isTrue(port.nextInput(again) && again.toHex().equals(released.toHex()));
+        port.radioSent();
+        port.hold(false);
+        controller.detach();
+        controller.attach();
+        port.hold(true);
+        controller.pump(8);
+        Bytes fresh = Bytes();
+        Expect.isTrue(port.nextInput(fresh) && fresh.get(0) == DESKTOP_KEYBOARD && fresh.get(1) == 2);
+        port.hold(false);
+        controller.detach();
     }
 
     class bool missingIdentity(string path) {
@@ -609,6 +642,7 @@ int main() {
     DeckpadUnitTests.controller();
     DeckpadUnitTests.usbDevice();
     DeckpadUnitTests.bluetoothPort();
+    DeckpadUnitTests.bluetoothRetry();
     DeckpadUnitTests.pairing();
     DeckpadUnitTests.links();
     DeckpadUnitTests.dialledWhileHeld();

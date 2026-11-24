@@ -66,6 +66,15 @@ class DesktopInput {
         return report;
     }
 
+    // GET_REPORT describes the state, so it never replays a relative movement.
+    public bool snapshot(int id, Bytes report) {
+        if (id == DESKTOP_MOUSE) { report.appendBytes(self.mouse(0, 0, 0)); return true; }
+        if (id == DESKTOP_KEYBOARD) { report.appendBytes(self.keyboard()); return true; }
+        return false;
+    }
+
+    public bool active() { return self.enabled; }
+
     public void enable(bool value) {
         if (self.enabled == value) { return; }
         self.enabled = value;

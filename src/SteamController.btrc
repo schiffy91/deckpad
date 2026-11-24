@@ -153,14 +153,14 @@ class SteamController {
 
     // The host wrote feature report 1: a command, answered by the next read.
     public void setFeature(Bytes data, long long now = 0LL) {
-        if (data.length() < 3 || data.get(0) != STEAM_REPORT_FEATURE) { return; }
+        if (data.length() < 2 || data.get(0) != STEAM_REPORT_FEATURE) { return; }
         Wire.resetZeros(self.commandMemory, 64);
         int copyCount = data.length() - 1 > 63 ? 63 : data.length() - 1;
         for (int index = 0; index < copyCount; index++) {
             self.commandMemory.set(index, data.get(index + 1));
         }
         if (self.commandMemory.get(0) == STEAM_LOAD_DEFAULTS) { self.resetDesktop(); }
-        if (self.commandMemory.get(0) != STEAM_SET_SETTINGS) { return; }
+        if (self.commandMemory.get(0) != STEAM_SET_SETTINGS || copyCount < 2) { return; }
         // Each complete tuple is a register and a little-endian 16-bit value.
         int count = Wire.clamp(self.commandMemory.get(1), 0, copyCount - 2);
         for (int index = 0; index + 2 < count; index += 3) {
