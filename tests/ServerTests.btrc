@@ -10,6 +10,7 @@ import Library.Timer;
 import Library.USB.USBDescriptors;
 import Library.USB.USBIP;
 import Library.Vector;
+import deckpad.DesktopInput;
 import deckpad.Control;
 import deckpad.Host;
 import deckpad.PadState;
@@ -68,7 +69,7 @@ class DeckpadServerTests {
         Expect.isTrue(host.controlIn(USBSetup(0x80, USB_REQUEST_GET_DESCRIPTOR, 0x0100, 0, 18), device) == 18 && Wire.u16le(device, 8) == STEAM_VENDOR);
         Bytes configuration = Bytes();
         Expect.isTrue(host.controlIn(USBSetup(0x80, USB_REQUEST_GET_DESCRIPTOR, 0x0200, 0, 255), configuration) == 41 && configuration.get(14) == 3);
-        Expect.intEq(host.controlIn(USBSetup(0x81, USB_REQUEST_GET_DESCRIPTOR, 0x2200, 0, 512), Bytes()), 143);
+        Expect.intEq(host.controlIn(USBSetup(0x81, USB_REQUEST_GET_DESCRIPTOR, 0x2200, 0, 512), Bytes()), Wire.u16le(configuration, 25));
         Expect.isTrue(host.controlIn(USBSetup(0x80, USB_REQUEST_GET_DESCRIPTOR, 0x0600, 0, 10), Bytes()) < 0);
         Expect.intEq(host.controlOut(USBSetup(0x00, USB_REQUEST_SET_CONFIGURATION, 1, 0, 0), Bytes()), 0);
         Bytes raw = Wire.zeros(64);
@@ -86,6 +87,8 @@ class DeckpadServerTests {
     class void reports(USBIPHost host) {
         int states = 0;
         int last = -1;
+        bool entered = false;
+        bool enterReleased = false;
         bool pressed = false;
         bool released = false;
         bool battery = false;
@@ -96,6 +99,13 @@ class DeckpadServerTests {
             Bytes report = Bytes();
             int length = host.transferIn(1, 64, report);
             Expect.isTrue(length > 0);
+            if (report.get(0) == DESKTOP_KEYBOARD) {
+                Expect.intEq(length, 2);
+                if (report.get(1) == 1) { entered = true; }
+                if (entered && report.get(1) == 0) { enterReleased = true; }
+                continue;
+            }
+            if (report.get(0) == DESKTOP_MOUSE) { Expect.intEq(length, 7); continue; }
             if (report.get(0) == STEAM_REPORT_BATTERY) { battery = length == 15; continue; }
             Expect.isTrue(report.get(0) == STEAM_REPORT_STATE && length == 54);
             if (last >= 0) { Expect.intEq(report.get(1), (last + 1) & 0xFF); }
@@ -108,7 +118,7 @@ class DeckpadServerTests {
             states++;
         }
         Expect.isTrue(states >= 150);
-        Expect.isTrue(pressed && released && battery);
+        Expect.isTrue(pressed && released && battery && entered && enterReleased);
         Expect.isTrue(total / (long long)states < 10000LL && slowest < 100000LL);
     }
 
@@ -122,7 +132,7 @@ class DeckpadServerTests {
         // in turn (cancelIn throws otherwise) and stay in step afterwards.
         host.cancelIn(1, 64);
         Bytes next = Bytes();
-        Expect.isTrue(host.transferIn(1, 64, next) > 0 && (next.get(0) == STEAM_REPORT_STATE || next.get(0) == STEAM_REPORT_BATTERY));
+        Expect.isTrue(host.transferIn(1, 64, next) > 0 && (next.get(0) == STEAM_REPORT_STATE || next.get(0) == STEAM_REPORT_BATTERY || next.get(0) == DESKTOP_KEYBOARD || next.get(0) == DESKTOP_MOUSE));
         Bytes feature = Bytes();
         Expect.isTrue(host.controlIn(USBSetup(0xA1, 0x01, 0x0301, 0, 64), feature) == 64 && feature.get(0) == STEAM_REPORT_FEATURE);
     }

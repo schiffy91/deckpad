@@ -5,6 +5,7 @@ name = "nixos_deckpad"
 exports = [
     "Wire",
     "PadState",
+    "DesktopInput",
     "PadSource",
     "DeckPad",
     "SteamController",

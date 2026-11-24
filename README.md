@@ -56,7 +56,25 @@ deckpad measure [SECONDS]      on the PC: how steadily the attached controller's
 
 ### In games on the PC
 
-Steam on the PC treats the controller as it does a Deck's own controls, and
+With Steam closed on both machines, start Deck Pad from the Deck's Plasma tray.
+The PC's HID drivers receive an ordinary mouse and keyboard over USB-C, network
+or Bluetooth. Move the pointer with the right trackpad, left-click with its
+click or R2, right-click with L2, and scroll vertically with the left trackpad.
+A/B send Enter/Escape, X/Y send Space/Tab, and the D-pad sends arrow keys.
+Network still requires `deckpad attach` on the PC.
+
+Deck Pad implements these desktop bindings on the emulated controller. The
+2026 controller uses one HID interface, so the mouse and keyboard are standard
+HID application collections alongside its gamepad reports. A client can
+suspend the desktop bindings with the lizard-mode setting and restore them by
+enabling it or loading defaults. With the watchdog enabled (the default),
+five seconds without a renewal restores desktop input. SDL renews every three
+seconds. A handoff releases held inputs and starts the next touch at its
+current position. These bindings and timeout are Deck Pad defaults. Exact
+Valve firmware bindings, pointer feel, and Steam's handoff on physical
+hardware still need comparison.
+
+With Steam running, Steam on the PC treats the controller as it does a Deck's own controls, and
 uses the layouts saved for those.
 
 - A game started from Steam gets that game's layout.

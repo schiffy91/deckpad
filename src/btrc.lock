@@ -1,1 +1,1 @@
-{"manifest-hash":"a1820ce74c086284d6cc4541dfeaf58ddbe2136327bdbf4c732af85013e71aaa","packages":[{"dependencies":{},"manifest-hash":"52fa60359b852e0912a68023743dfb157729ac260cc57665c39b9f3aa4850af8","name":"nixos_deckpad","source":{"path":"."}}],"root":"nixos_deckpad","schema":3}
+{"manifest-hash":"17be6b4931640ab8798ea6a8f50e888e41f584980f2defd96946eccf23873220","packages":[{"dependencies":{},"manifest-hash":"4e0233db1473d713d5284f182b83876265a332b7d4ef19f707b9afbe9c8eb38b","name":"nixos_deckpad","source":{"path":"."}}],"root":"nixos_deckpad","schema":3}

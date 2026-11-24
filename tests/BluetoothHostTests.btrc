@@ -3,6 +3,7 @@ import Library.Bytes;
 import Library.CLI;
 import Library.Testing;
 import Library.Timer;
+import deckpad.DesktopInput;
 import deckpad.SteamController;
 
 // A Bluetooth host for the served controller, on a second adapter of the same
@@ -30,6 +31,8 @@ class DeckpadBluetoothHost {
             Bytes report = Bytes();
             int length = interrupt.receive(report, 2000);
             Expect.isTrue(length > 0 && report.get(0) == 0xA1);
+            if (report.get(1) == DESKTOP_MOUSE) { Expect.intEq(length, 8); continue; }
+            if (report.get(1) == DESKTOP_KEYBOARD) { Expect.intEq(length, 3); continue; }
             if (report.get(1) == STEAM_REPORT_BATTERY) { battery = length == 16; continue; }
             Expect.isTrue(report.get(1) == STEAM_REPORT_STATE_BLUETOOTH && length == 1 + STEAM_STATE_LENGTH_BLUETOOTH);
             // Reports may be skipped when the radio is behind, never reordered.
