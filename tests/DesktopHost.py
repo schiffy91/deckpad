@@ -2,6 +2,7 @@
 import fcntl
 import os
 import select
+import socket
 import struct
 import sys
 import time
@@ -10,29 +11,18 @@ from pathlib import Path
 from evdev import InputDevice, ecodes as E, list_devices
 
 product = int(sys.argv[1], 16)
-fixture = Path("/tmp/shared/deckpad-input.bin")
-applied = fixture.with_suffix(".bin.applied")
-sequence = int(applied.read_text() or "0") if applied.exists() else 0
+# The fixture lives on the Deck VM. Its reply acknowledges a physical input sample.
+fixture = socket.create_connection(("deck", 3245), timeout=8)
 
 
 def drive(*, pressed=False, touch=False, x=0, y=0, scroll=0):
-    global sequence
-    sequence = (sequence + 1) % 256
     report = bytearray(64)
     report[:4] = bytes([1, 0, 9, 64])
     report[8] = 0x80 if pressed else 0  # A
     report[10] = (0x18 if touch else 0) | (4 if pressed else 0)  # both pads, right click
     struct.pack_into("<hhh", report, 18, scroll, x, y)
-    report[63] = sequence
-    temporary = fixture.with_suffix(".new")
-    temporary.write_bytes(report)
-    temporary.replace(fixture)
-    until = time.monotonic() + 3
-    while time.monotonic() < until:
-        if applied.exists() and applied.read_text() == str(sequence):
-            return
-        time.sleep(0.01)
-    raise AssertionError("the emulated physical Deck did not apply the input")
+    fixture.sendall(report)
+    assert fixture.recv(1) == b"+", "the emulated physical Deck did not apply the input"
 
 
 def desktop_nodes():

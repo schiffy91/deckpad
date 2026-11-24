@@ -56,7 +56,7 @@ let
 in pkgs.testers.runNixOSTest {
   name = "deckpad-kernel";
   nodes.deck = {
-    networking.firewall.allowedTCPPorts = [ 3240 ];
+    networking.firewall.allowedTCPPorts = [ 3240 3245 ];
     services.openssh.enable = true;   # for the host key, the machine's identity
     boot.kernelModules = [ "dummy_hcd" "libcomposite" "usb_f_fs" "hci_vhci" "vhci-hcd" "hidp" ];
     hardware.bluetooth = {
@@ -73,9 +73,10 @@ in pkgs.testers.runNixOSTest {
     # The emulated Deck controller, and a service that reads it. The service
     # shares the first one's state, so the PC it paired with is still trusted.
     systemd.services.fake-deck.serviceConfig = {
-      ExecStart = "${tests}/bin/deckpad-fake-deck /run/fake-deck/commands /tmp/shared/deckpad-input.bin";
+      ExecStart = "${tests}/bin/deckpad-fake-deck /run/fake-deck/commands /run/fake-deck/input";
       RuntimeDirectory = "fake-deck";
     };
+    systemd.services.fixture-control.serviceConfig.ExecStart = "${pkgs.python3}/bin/python ${./FixtureControl.py}";
     systemd.services.deckpad-deck.serviceConfig = {
       ExecStart = "${deckpad} serve --source deck --serial FXDK00000004 --control-port 3244 --runtime /run/deckpad-deck --state /var/lib/deckpad";
       ExecStopPost = "${deckpad} release";
@@ -124,6 +125,11 @@ in pkgs.testers.runNixOSTest {
     start_all()
     deck.wait_for_unit("multi-user.target")
     pc.wait_for_unit("multi-user.target")
+
+    with subtest("Steam is absent on both machines"):
+        for machine in (deck, pc):
+            machine.fail("command -v steam")
+            machine.fail("pgrep -x steam")
 
     with subtest("each machine is known by its SSH host key"):
         assert deck.succeed("deckpad key").split()[:2] == deck.succeed("cat /etc/ssh/ssh_host_ed25519_key.pub").split()[:2]
@@ -243,7 +249,11 @@ in pkgs.testers.runNixOSTest {
         deck.wait_until_fails("grep -qx FAKEDECK0001 /sys/bus/usb/devices/*/serial", timeout=60)
 
     with subtest("network desktop input, takeover, expiry, rumble and fresh attachment"):
-        deck.succeed("systemctl start fake-deck.service deckpad-deck.service")
+        deck.succeed("systemctl start fake-deck.service fixture-control.service")
+        deck.wait_until_succeeds("grep -qx FAKEDECK0001 /sys/bus/usb/devices/*/serial", timeout=60)
+        pad = deck.succeed("basename $(dirname $(grep -lx FAKEDECK0001 /sys/bus/usb/devices/*/serial))").strip()
+        deck.wait_until_succeeds(f"test $(basename $(readlink /sys/bus/usb/devices/{pad}:1.2/driver)) = usbhid", timeout=60)
+        deck.succeed("systemctl start deckpad-deck.service")
         deck.wait_for_open_port(3240)
         pc.succeed("systemctl start deckpad-attach.service")
         desktop(pc, "1302")
