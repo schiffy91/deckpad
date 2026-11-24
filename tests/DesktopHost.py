@@ -118,6 +118,15 @@ def setting(value, watchdog=True):
     fcntl.ioctl(raw, 0xc0404806, report)
 
 
+def desktop_mode():
+    report = bytearray(64)
+    report[:6] = bytes([1, 0x89, 3, 9, 0, 0])
+    fcntl.ioctl(raw, 0xc0404806, report)
+    fcntl.ioctl(raw, 0xc0404807, report)  # HIDIOCGFEATURE(64)
+    assert report[:4] == bytes([1, 0x89, 3, 9]), report
+    return struct.unpack_from("<H", report, 4)[0]
+
+
 drive(pressed=True)
 expect_events(edges(1))
 setting(0, watchdog=False)
@@ -149,6 +158,9 @@ time.sleep(2.2)
 drive(pressed=True)
 expect_events({})
 drive()
-time.sleep(3)
+deadline = time.monotonic() + 5
+while desktop_mode() == 0:
+    assert time.monotonic() < deadline, "desktop watchdog did not expire"
+    time.sleep(0.1)
 gesture()  # watchdog expiry without closing the raw device
 setting(0, watchdog=False)  # reconnect must start in desktop mode
